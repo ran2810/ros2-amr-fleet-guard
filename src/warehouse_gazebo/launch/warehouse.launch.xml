@@ -1,0 +1,49 @@
+<launch>
+  <!-- fleet -->
+  <arg name="num_robots" default="2" description="Number of AMRs to spawn (1..8)"/>
+
+  <!-- simulator -->
+  <arg name="world" default="$(find-pkg-share warehouse_gazebo)/worlds/warehouse.sdf"
+       description="SDF world file"/>
+  <arg name="headless" default="false" description="true = Gazebo server only (no GUI)"/>
+  <arg name="render_engine" default="ogre2" description="ogre2 or ogre (if fails)"/>
+  <arg name="gz_verbosity" default="2" description="gz sim -v level (0-4)"/>
+
+  <!-- tooling -->
+  <arg name="rviz" default="true" description="Start RViz"/>
+  <arg name="publish_static_map_tf" default="true"
+       description="Static map->robotN/odom"/>
+
+  <!-- sensor load knobs (the main CPU levers once you go beyond 2 robots) -->
+  <arg name="lidar_rate" default="10" description="LiDAR update rate [Hz]"/>
+  <arg name="lidar_samples" default="360" description="LiDAR beams per scan"/>
+  <arg name="imu_rate" default="50" description="IMU update rate [Hz]"/>
+
+  <!-- Gazebo, with GUI -->
+  <include file="$(find-pkg-share ros_gz_sim)/launch/gz_sim.launch.py" unless="$(var headless)">
+    <arg name="gz_args"
+         value="-r -v $(var gz_verbosity) --render-engine-server $(var render_engine) --render-engine-gui $(var render_engine) $(var world)"/>
+    <arg name="on_exit_shutdown" value="true"/>
+  </include>
+
+  <!-- Gazebo, server only -->
+  <include file="$(find-pkg-share ros_gz_sim)/launch/gz_sim.launch.py" if="$(var headless)">
+    <arg name="gz_args"
+         value="-r -s --headless-rendering -v $(var gz_verbosity) --render-engine-server $(var render_engine) $(var world)"/>
+    <arg name="on_exit_shutdown" value="true"/>
+  </include>
+
+  <!-- one shared simulation clock for every ROS node -->
+  <node pkg="ros_gz_bridge" exec="parameter_bridge" name="clock_bridge" output="screen"
+        args="/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"/>
+
+  <!-- N namespaced robots (a loop -> Python launch file) -->
+  <include file="$(find-pkg-share warehouse_gazebo)/launch/spawn_fleet.launch.py">
+    <arg name="num_robots" value="$(var num_robots)"/>
+    <arg name="rviz" value="$(var rviz)"/>
+    <arg name="publish_static_map_tf" value="$(var publish_static_map_tf)"/>
+    <arg name="lidar_rate" value="$(var lidar_rate)"/>
+    <arg name="lidar_samples" value="$(var lidar_samples)"/>
+    <arg name="imu_rate" value="$(var imu_rate)"/>
+  </include>
+</launch>
