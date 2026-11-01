@@ -1,0 +1,36 @@
+<launch>
+  <!--
+    Phase 5+ entry point: simulator + fleet + Nav2 stacks.
+
+      ros2 launch warehouse_navigation fleet_nav.launch.xml       # 1 robot, Nav2 on it
+      ros2 launch warehouse_navigation fleet_nav.launch.xml num_robots:=2 nav_robots:=1
+      ros2 launch warehouse_navigation fleet_nav.launch.xml num_robots:=2 nav_robots:=2  
+
+    Robots 1..nav_robots get a Nav2 stack and AMCL - Adaptive Monte Carlo Localization (which then owns map -> robotN/odom).
+    Remaining robots keep the static map -> odom transform from the simulation launch.
+    # added delay at start-up due to queue is full msg in terminal 
+  -->
+  <arg name="num_robots" default="1" description="Robots to spawn (1..8)"/>
+  <arg name="nav_robots" default="1" description="Robots 1..N run Nav2 (0 = simulation only)"/>
+  <arg name="headless" default="false"/>
+  <arg name="rviz" default="true"/>
+  <arg name="lidar_rate" default="10"/>
+  <arg name="lidar_samples" default="360"/>
+  <arg name="imu_rate" default="50"/>
+  <arg name="lifecycle_delay" default="4.0" description="Seconds before Nav2 lifecycle managers start (raise if bringup fails)"/>
+
+  <include file="$(find-pkg-share warehouse_gazebo)/launch/warehouse.launch.xml">
+    <arg name="num_robots" value="$(var num_robots)"/>
+    <arg name="num_nav_robots" value="$(var nav_robots)"/>
+    <arg name="headless" value="$(var headless)"/>
+    <arg name="rviz" value="$(var rviz)"/>
+    <arg name="lidar_rate" value="$(var lidar_rate)"/>
+    <arg name="lidar_samples" value="$(var lidar_samples)"/>
+    <arg name="imu_rate" value="$(var imu_rate)"/>
+  </include>
+
+  <include file="$(find-pkg-share warehouse_navigation)/launch/navigation.launch.py">
+    <arg name="num_nav_robots" value="$(var nav_robots)"/>
+    <arg name="lifecycle_delay" value="$(var lifecycle_delay)"/>
+  </include>
+</launch>

@@ -45,7 +45,7 @@ def _arg(context, name):
     return LaunchConfiguration(name).perform(context)
 
 
-def _rviz_config(num_robots):
+def _rviz_config(num_robots, num_nav_robots=0):
     """Write an RViz config that matches the number of spawned robots."""
     topic = lambda value, reliability, durability: {  # noqa: E731
         'Value': value, 'Depth': 5, 'History Policy': 'Keep Last',
@@ -69,6 +69,37 @@ def _rviz_config(num_robots):
             'Topic': topic(f'/{ns}/scan', 'Best Effort', 'Volatile'),
             'Style': 'Flat Squares', 'Size (m)': 0.04, 'Color Transformer': 'FlatColor',
             'Color': f'{r}; {g}; {b}', 'Use Fixed Frame': True, 'Decay Time': 0})
+    for i in range(num_nav_robots):
+        ns = f'robot_{i + 1}'
+        displays.insert(0, {
+            'Class': 'rviz_default_plugins/Map', 'Name': f'{ns} map', 'Enabled': True,
+            'Topic': topic(f'/{ns}/map', 'Reliable', 'Transient Local'),
+            'Alpha': 0.7, 'Color Scheme': 'map'})
+        for label, name in (('global costmap', 'global_costmap'), ('local costmap', 'local_costmap')):
+            displays.append({
+                'Class': 'rviz_default_plugins/Map', 'Name': f'{ns} {label}', 'Enabled': label == 'global costmap',
+                'Topic': topic(f'/{ns}/{name}/costmap', 'Reliable', 'Transient Local'),
+                'Alpha': 0.4, 'Color Scheme': 'costmap'})
+        displays.append({
+            'Class': 'rviz_default_plugins/Path', 'Name': f'{ns} plan', 'Enabled': True,
+            'Topic': topic(f'/{ns}/plan', 'Reliable', 'Volatile'),
+            'Color': '25; 255; 0', 'Line Style': 'Lines'})
+        displays.append({   # AMCL particles (nav2_rviz_plugins, part of ros-jazzy-navigation2); best-effort QoS
+            'Class': 'nav2_rviz_plugins/ParticleCloud', 'Name': f'{ns} particles', 'Enabled': True,
+            'Topic': topic(f'/{ns}/particle_cloud', 'Best Effort', 'Volatile')})
+    tools = [
+        {'Class': 'rviz_default_plugins/MoveCamera'},
+        {'Class': 'rviz_default_plugins/Select'},
+        {'Class': 'rviz_default_plugins/FocusCamera'},
+        {'Class': 'rviz_default_plugins/Measure'},
+    ]
+    if num_nav_robots:   # the toolbar tools publish for robot_1 (fleet manager will do the rest later)
+        tools += [
+            {'Class': 'rviz_default_plugins/SetInitialPose',
+             'Topic': topic('/robot_1/initialpose', 'Reliable', 'Volatile')},
+            {'Class': 'rviz_default_plugins/SetGoal',
+             'Topic': topic('/robot_1/goal_pose', 'Reliable', 'Volatile')},
+        ]
     config = {
         'Panels': [
             {'Class': 'rviz_common/Displays', 'Name': 'Displays'},
@@ -77,12 +108,7 @@ def _rviz_config(num_robots):
         'Visualization Manager': {
         'Class': '', 'Name': 'root', 'Enabled': True, 'Displays': displays,
         # without a camera tool the mouse cannot pan/zoom/rotate the view
-        'Tools': [
-            {'Class': 'rviz_default_plugins/MoveCamera'},
-            {'Class': 'rviz_default_plugins/Select'},
-            {'Class': 'rviz_default_plugins/FocusCamera'},
-            {'Class': 'rviz_default_plugins/Measure'},
-        ],
+        'Tools': tools,
         'Global Options': {'Fixed Frame': 'map', 'Frame Rate': 20, 'Background Color': '40; 44; 52'},
         'Views': {'Current': {
             'Class': 'rviz_default_plugins/TopDownOrtho', 'Name': 'Current View',
@@ -100,6 +126,7 @@ def _launch_setup(context):
 
     use_sim_time = _flag(context, 'use_sim_time')
     static_map_tf = _flag(context, 'publish_static_map_tf')
+    num_nav = int(_arg(context, 'num_nav_robots'))
     gz_pkg = get_package_share_directory('warehouse_gazebo')
     desc_pkg = get_package_share_directory('warehouse_description')
     xacro_path = os.path.join(desc_pkg, 'urdf', 'amr.urdf.xacro')
@@ -147,8 +174,9 @@ def _launch_setup(context):
             remappings=[(f'/{ns}/tf', '/tf')],
             parameters=[{'use_sim_time': use_sim_time}]))
 
-        if static_map_tf:
+        if static_map_tf and i >= num_nav:
             # DiffDrive odometry starts at 0 at spawn, so odom frame == spawn pose in map.
+            # Robots with a Nav2 stack skip this: AMCL publishes their map -> odom.
             always.append(Node(
                 package='tf2_ros', executable='static_transform_publisher',
                 name=f'{ns}_map_to_odom', output='log',
@@ -178,7 +206,7 @@ def _launch_setup(context):
     if _flag(context, 'rviz'):
         actions.append(Node(
             package='rviz2', executable='rviz2', name='rviz2', output='log',
-            arguments=['-d', _rviz_config(num_robots)],
+            arguments=['-d', _rviz_config(num_robots, num_nav)],
             parameters=[{'use_sim_time': use_sim_time}]))
     return actions
 
@@ -191,7 +219,9 @@ def generate_launch_description():
         declare('use_sim_time', 'true', 'Use /clock from Gazebo'),
         declare('rviz', 'true', 'Start RViz with a config generated for num_robots'),
         declare('publish_static_map_tf', 'true',
-                'Publish static map->robotN/odom (Phases 1-4). Set false once AMCL owns map->odom'),
+                'Publish static map->robotN/odom for robots that have no Nav2/AMCL'),
+        declare('num_nav_robots', '0',
+                'Robots 1..N run Nav2 (AMCL owns their map->odom, RViz shows nav displays)'),
         declare('lidar_rate', '10', 'LiDAR update rate [Hz]'),
         declare('lidar_samples', '360', 'LiDAR beams per scan'),
         declare('imu_rate', '50', 'IMU update rate [Hz]'),
