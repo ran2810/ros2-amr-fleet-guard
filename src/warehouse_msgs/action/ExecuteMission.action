@@ -1,0 +1,10 @@
+# Offered by every robot agent on /<robot_id>/execute_mission.
+string task_id
+string pickup_id
+string drop_id
+---
+bool success
+string message
+---
+string stage
+float32 battery

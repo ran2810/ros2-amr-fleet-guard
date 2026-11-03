@@ -87,6 +87,9 @@ def _rviz_config(num_robots, num_nav_robots=0):
         displays.append({   # AMCL particles (nav2_rviz_plugins, part of ros-jazzy-navigation2); best-effort QoS
             'Class': 'nav2_rviz_plugins/ParticleCloud', 'Name': f'{ns} particles', 'Enabled': True,
             'Topic': topic(f'/{ns}/particle_cloud', 'Best Effort', 'Volatile')})
+    displays.append({   # fleet manager: stations, task routes per robot, queue (empty without the manager)
+        'Class': 'rviz_default_plugins/MarkerArray', 'Name': 'fleet tasks', 'Enabled': True,
+        'Topic': topic('/fleet/markers', 'Reliable', 'Volatile')})
     tools = [
         {'Class': 'rviz_default_plugins/MoveCamera'},
         {'Class': 'rviz_default_plugins/Select'},

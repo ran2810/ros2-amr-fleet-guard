@@ -1,0 +1,7 @@
+# Ask the fleet manager to move a load from a pick station to a drop station.
+string pickup_id     # e.g. pick_1
+string drop_id       # e.g. drop_3
+---
+bool accepted
+string task_id
+string message

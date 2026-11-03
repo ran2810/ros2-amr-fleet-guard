@@ -1,0 +1,37 @@
+<launch>
+  <!--
+    Everything: simulator + Nav2 for every robot + robot agents + fleet manager.
+
+      ros2 launch warehouse_fleet_manager fleet_sim.launch.xml num_robots:=4 headless:=true
+      ros2 run warehouse_fleet_manager submit_random_tasks (see its help for count and interval)
+      ros2 run warehouse_fleet_manager fleet_monitor
+  -->
+  <arg name="num_robots" default="2" description="Robots to spawn, each with Nav2 + an agent (1..8)"/>
+  <arg name="headless" default="true"/>
+  <arg name="rviz" default="true"/>
+  <arg name="lidar_rate" default="10"/>
+  <arg name="lidar_samples" default="360"/>
+  <arg name="nav_stagger" default="10.0" description="Seconds between starting each robot's Nav2 stack (raise for 4+ robots)"/>
+  <arg name="lifecycle_delay" default="4.0" description="Seconds before the Nav2 lifecycle managers start (raise on a loaded machine)"/>
+  <arg name="initial_soc" default="100.0"/>
+  <arg name="drain_per_meter" default="0.5"/>
+  <arg name="charge_rate" default="0.8"/>
+
+  <include file="$(find-pkg-share warehouse_navigation)/launch/fleet_nav.launch.xml">
+    <arg name="num_robots" value="$(var num_robots)"/>
+    <arg name="nav_robots" value="$(var num_robots)"/>
+    <arg name="headless" value="$(var headless)"/>
+    <arg name="rviz" value="$(var rviz)"/>
+    <arg name="lidar_rate" value="$(var lidar_rate)"/>
+    <arg name="lidar_samples" value="$(var lidar_samples)"/>
+    <arg name="nav_stagger" value="$(var nav_stagger)"/>
+    <arg name="lifecycle_delay" value="$(var lifecycle_delay)"/>
+  </include>
+
+  <include file="$(find-pkg-share warehouse_fleet_manager)/launch/fleet.launch.py">
+    <arg name="num_robots" value="$(var num_robots)"/>
+    <arg name="initial_soc" value="$(var initial_soc)"/>
+    <arg name="drain_per_meter" value="$(var drain_per_meter)"/>
+    <arg name="charge_rate" value="$(var charge_rate)"/>
+  </include>
+</launch>
