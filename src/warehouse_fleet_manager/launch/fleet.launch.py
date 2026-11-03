@@ -12,11 +12,13 @@ from launch_ros.actions import Node
 
 BATTERY_ARGS = {
     'initial_soc': ('100.0', 'Starting state of charge [%] (lower it to see charging sooner)'),
-    'drain_per_meter': ('0.25', 'Battery drain per metre driven [%/m]'),
+    'drain_per_meter': ('0.2', 'Battery drain per metre driven [%/m]'),
     'drain_idle': ('0.005', 'Battery drain while idle [%/s]'),
-    'charge_rate': ('0.5', 'Charging rate on the dock [%/s]'),
-    'min_mission_soc': ('35.0', 'Agent refuses missions below this SOC [%]'),
-    'min_battery': ('40.0', 'Fleet manager only assigns to robots at or above this SOC [%]'),
+    'charge_rate': ('0.6', 'Charging rate on the dock [%/s]'),
+    'min_mission_soc': ('25.0', 'Agent refuses missions below this SOC [%]'),
+    'min_battery': ('35.0', 'Fleet manager only assigns to robots at or above this SOC [%]'),
+    'detour_factor': ('1.5', 'Energy estimate: straight-line distance is multiplied by this (agents and manager)'),
+    'reserve_soc': ('10.0', 'Energy estimate: battery that must remain when a mission ends [%]'),
 }
 
 
@@ -36,12 +38,16 @@ def _setup(context):
                          'drain_per_meter': value('drain_per_meter'),
                          'drain_idle': value('drain_idle'),
                          'charge_rate': value('charge_rate'),
-                         'min_mission_soc': value('min_mission_soc')}]))
+                         'min_mission_soc': value('min_mission_soc'),
+                         'detour_factor': value('detour_factor'),
+                         'reserve_soc': value('reserve_soc')}]))
     nodes.append(Node(
         package='warehouse_fleet_manager', executable='fleet_manager', name='fleet_manager',
         output='screen',
         parameters=[{'robot_ids': ids, 'use_sim_time': use_sim_time,
-                     'min_battery': value('min_battery')}]))
+                     'min_battery': value('min_battery'),
+                     'detour_factor': value('detour_factor'),
+                     'reserve_soc': value('reserve_soc')}]))
     return nodes
 
 

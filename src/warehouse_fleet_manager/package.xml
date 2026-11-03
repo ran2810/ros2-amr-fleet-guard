@@ -4,7 +4,7 @@
   <name>warehouse_fleet_manager</name>
   <version>0.1.0</version>
   <description>Fleet manager: task queue, closest-available-healthy-robot allocation with battery check, fleet status.</description>
-  <maintainer email="you@example.com">Ranjith</maintainer>
+  <maintainer email="prkr@mail.de">Ranjith</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>

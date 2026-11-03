@@ -7,15 +7,15 @@
       ros2 run warehouse_fleet_manager fleet_monitor
   -->
   <arg name="num_robots" default="2" description="Robots to spawn, each with Nav2 + an agent (1..8)"/>
-  <arg name="headless" default="true"/>
+  <arg name="headless" default="false"/>
   <arg name="rviz" default="true"/>
   <arg name="lidar_rate" default="10"/>
   <arg name="lidar_samples" default="360"/>
   <arg name="nav_stagger" default="10.0" description="Seconds between starting each robot's Nav2 stack (raise for 4+ robots)"/>
   <arg name="lifecycle_delay" default="4.0" description="Seconds before the Nav2 lifecycle managers start (raise on a loaded machine)"/>
   <arg name="initial_soc" default="100.0"/>
-  <arg name="drain_per_meter" default="0.5"/>
-  <arg name="charge_rate" default="0.8"/>
+  <arg name="drain_per_meter" default="0.2"/>
+  <arg name="charge_rate" default="0.6"/>
 
   <include file="$(find-pkg-share warehouse_navigation)/launch/fleet_nav.launch.xml">
     <arg name="num_robots" value="$(var num_robots)"/>

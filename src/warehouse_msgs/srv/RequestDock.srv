@@ -1,0 +1,10 @@
+# A robot asks the fleet manager which dock to go to: the nearest one that is neither reserved
+# for another robot nor physically occupied. The manager reserves it for the caller.
+string robot_id
+float32 x                # where the robot is now (map frame)
+float32 y
+string[] exclude         # docks not to offer (e.g. ones that could not be reached)
+---
+bool granted
+string dock_id
+string message

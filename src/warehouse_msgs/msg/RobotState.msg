@@ -27,3 +27,5 @@ float32 battery              # state of charge [%]
 float32 nearest_robot_m      # distance to the closest other robot (inf if unknown)
 string assigned_task         # empty when none
 string detail                # reason for DEGRADED / FAULTED / current dock-return cause
+string dock_id               # the dock this robot currently charges at / is heading to
+float32 drain_per_meter      # battery model: percent per metre driven (lets the manager estimate energy)

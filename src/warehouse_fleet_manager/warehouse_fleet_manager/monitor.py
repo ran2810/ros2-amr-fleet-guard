@@ -22,13 +22,13 @@ class Monitor(Node):
     def _show(self, msg):
         lines = ['\033[2J\033[H' + f'queued {msg.tasks_queued}  active {msg.tasks_active}  '
                  f'done {msg.tasks_done}  failed {msg.tasks_failed}', '',
-                 f'{"  robot":<9}{"state":<10}{"health":<10}{"battery":>8}{"nearest":>9}  {"task":<22}detail']
+                 f'{"  robot":<9}{"state":<10}{"health":<10}{"battery":>8}{"nearest":>9}  {"dock":<8}{"task":<22}detail']
         for r in sorted(msg.robots, key=lambda r: r.robot_id):
             near = '-' if math.isinf(r.nearest_robot_m) else f'{r.nearest_robot_m:.1f} m'
             red, green, blue = (int(255 * c) for c in PALETTE[(int(r.robot_id.split('_')[-1]) - 1) % len(PALETTE)])
             swatch = f'\033[38;2;{red};{green};{blue}m\u25a0\033[0m {r.robot_id:<7}'   # colour block = the robot's colour
             lines.append(f'{swatch}{NAMES.get(r.state, r.state):<10}{HEALTH.get(r.health, r.health):<10}'
-                         f'{r.battery:7.0f}%{near:>9}  {r.assigned_task:<22}{r.detail}')
+                         f'{r.battery:7.0f}%{near:>9}  {r.dock_id:<8}{r.assigned_task:<22}{r.detail}')
         print('\n'.join(lines), flush=True)
 
 

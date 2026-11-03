@@ -50,7 +50,7 @@ def _render_params(template_path, ns, dock, use_sim_time):
     return path
 
 
-def _nav_nodes(ns, params, map_yaml, use_sim_time, lifecycle_delay):
+def _nav_nodes(ns, params, map_yaml, nav_map_yaml, use_sim_time, lifecycle_delay):
     def nav2(package, executable, name=None, remappings=None, extra=None):
         return Node(package=package, executable=executable, name=name or executable,
                     namespace=ns, output='screen',
@@ -65,6 +65,7 @@ def _nav_nodes(ns, params, map_yaml, use_sim_time, lifecycle_delay):
 
     return [
         nav2('nav2_map_server', 'map_server', extra=[{'yaml_filename': map_yaml}]),
+        nav2('nav2_map_server', 'map_server', name='nav_map_server', extra=[{'yaml_filename': nav_map_yaml}]),
         nav2('nav2_amcl', 'amcl'),
         nav2('nav2_controller', 'controller_server', remappings=[('cmd_vel', 'cmd_vel_nav')]),
         nav2('nav2_planner', 'planner_server'),
@@ -75,7 +76,7 @@ def _nav_nodes(ns, params, map_yaml, use_sim_time, lifecycle_delay):
         # Lifecycle managers start late and one after the other: bringing every node up at the same
         # moment overloaded a CPU-only machine ("async_send_request failed", bringup aborted).
         TimerAction(period=lifecycle_delay, actions=[
-            lifecycle('lifecycle_manager_localization', ['map_server', 'amcl'])]),
+            lifecycle('lifecycle_manager_localization', ['map_server', 'nav_map_server', 'amcl'])]),
         TimerAction(period=lifecycle_delay + 4.0, actions=[
             lifecycle('lifecycle_manager_navigation',
                       ['controller_server', 'planner_server', 'behavior_server',
@@ -90,11 +91,13 @@ def _launch_setup(context):
     use_sim_time = LaunchConfiguration('use_sim_time').perform(context).lower() == 'true'
     wait_timeout = LaunchConfiguration('odom_wait_timeout').perform(context)
     lifecycle_delay = float(LaunchConfiguration('lifecycle_delay').perform(context))
+    nav_stagger = float(LaunchConfiguration('nav_stagger').perform(context))
 
     nav_pkg = get_package_share_directory('warehouse_navigation')
     gz_pkg = get_package_share_directory('warehouse_gazebo')
     template = os.path.join(nav_pkg, 'config', 'nav2_params.yaml')
     map_yaml = os.path.join(nav_pkg, 'maps', 'warehouse.yaml')
+    nav_map_yaml = os.path.join(nav_pkg, 'maps', 'warehouse_nav.yaml')
     with open(os.path.join(gz_pkg, 'config', 'stations.yaml')) as f:
         docks = yaml.safe_load(f)['docks']
 
@@ -109,9 +112,10 @@ def _launch_setup(context):
                  '--field', 'header.frame_id', f'/{ns}/odom'],
             name=f'wait_{ns}_odom', output='log')
         actions.append(wait_odom)
-        actions.append(RegisterEventHandler(OnProcessExit(
-            target_action=wait_odom,
-            on_exit=_nav_nodes(ns, params, map_yaml, use_sim_time, lifecycle_delay))))
+        nodes = _nav_nodes(ns, params, map_yaml, nav_map_yaml, use_sim_time, lifecycle_delay)
+        if i > 0:   # bring the stacks up one after another: 2+ at once overloaded a CPU-only machine
+            nodes = [TimerAction(period=i * nav_stagger, actions=nodes)]
+        actions.append(RegisterEventHandler(OnProcessExit(target_action=wait_odom, on_exit=nodes)))
     return actions
 
 
@@ -123,6 +127,8 @@ def generate_launch_description():
         DeclareLaunchArgument('lifecycle_delay', default_value='4.0',
                               description='Seconds after the Nav2 nodes start before the lifecycle managers run '
                                           '(navigation manager runs 4 s later); raise on a loaded machine'),
+        DeclareLaunchArgument('nav_stagger', default_value='10.0',
+                              description='Seconds between starting consecutive robots\' Nav2 stacks'),
         DeclareLaunchArgument('odom_wait_timeout', default_value='240',
                               description='Max seconds to wait for a robot to appear before starting its Nav2'),
         OpaqueFunction(function=_launch_setup),

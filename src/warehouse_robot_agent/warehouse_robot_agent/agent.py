@@ -4,22 +4,26 @@
 Owns everything about ONE robot that is not navigation:
 
   * mission FSM   IDLE -> NAVIGATING_TO_PICK -> PICK -> NAVIGATING_TO_DROP -> DROP -> IDLE
-  * default position: after a failed mission, when idle for a while, or when the battery is low the
-    agent drives the robot back to its dock (NAVIGATING_TO_DOCK); if even that fails -> FAULT
-  * battery model (simulated state of charge): drains with distance driven and time, charges on the dock
+  * energy awareness
+      - a mission is only accepted if the battery covers pose -> pickup -> drop -> nearest dock
+        plus a reserve (estimate: straight-line distance * detour_factor * drain_per_meter)
+      - during a mission, if the battery falls to what is needed to reach the nearest dock, the mission
+        is dropped (the manager re-queues it) and the robot goes to charge
+  * default position / charging: after a failed or dropped mission, when idle for a while, or when the
+    battery is low the robot asks the fleet manager for a dock (the nearest free one, not necessarily
+    its own), drives there (NAVIGATING_TO_DOCK) and charges (CHARGE). If that fails -> FAULT.
+  * battery model (simulated state of charge): drains with distance driven and time, charges on a dock
   * neighbour awareness: the simulated LiDAR plane passes above the other robots' chassis, so every
-    agent publishes the other robots' TF poses as filled discs of points (/robot_N/other_robots) that the
-    Nav2 costmaps consume as an extra obstacle source
+    agent publishes the other robots' TF poses as filled discs of points (/robot_N/other_robots)
+    that the Nav2 costmaps consume as an extra obstacle source
 
-Interfaces (relative to the /robot_N namespace):
+Interfaces (relative to the /robot_N namespace unless absolute):
     action  execute_mission   warehouse_msgs/action/ExecuteMission   (from the fleet manager)
     topic   robot_state       warehouse_msgs/msg/RobotState           2 Hz
     topic   other_robots      sensor_msgs/PointCloud2 in 'map'        10 Hz
     service reset_fault       std_srvs/Trigger                        retry the dock return after a FAULT
-    uses    navigate_to_pose  nav2_msgs/action/NavigateToPose, odom, TF (global /tf)
-
-Battery numbers are deliberately fast so the behaviour shows up in minutes of simulation:
-drain_per_meter / drain_idle / charge_rate are parameters.
+    uses    navigate_to_pose  nav2_msgs/action/NavigateToPose, odom, TF (global /tf),
+            /fleet/request_dock (warehouse_msgs/srv/RequestDock; falls back to the home dock)
 """
 import math
 import threading
@@ -46,10 +50,12 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 from warehouse_msgs.action import ExecuteMission
 from warehouse_msgs.msg import RobotState as S
+from warehouse_msgs.srv import RequestDock
 
 NAV_STATUS = {4: 'SUCCEEDED', 5: 'CANCELED', 6: 'ABORTED'}
 STATE_NAMES = {0: 'IDLE', 1: 'NAVIGATING_TO_PICK', 2: 'PICK', 3: 'NAVIGATING_TO_DROP', 4: 'DROP',
                5: 'NAVIGATING_TO_DOCK', 6: 'CHARGE', 7: 'FAULT', 8: 'STARTING'}
+MISSION_STATES = (S.NAVIGATING_TO_PICK, S.PICK, S.NAVIGATING_TO_DROP, S.DROP)
 
 
 def load_stations():
@@ -65,23 +71,26 @@ class RobotAgent(Node):
         super().__init__('robot_agent')
         p = self.declare_parameter
         self.robot_id = p('robot_id', 'robot_1').value
-        self.dock_id = p('dock_id', 'dock_1').value
+        self.home_dock_id = p('dock_id', 'dock_1').value
         self.robot_ids = list(p('robot_ids', ['robot_1']).value)
         # battery model (percent state of charge)
         self.initial_soc = float(p('initial_soc', 100.0).value)
         self.drain_per_meter = float(p('drain_per_meter', 0.25).value)    # % per metre driven
         self.drain_idle = float(p('drain_idle', 0.005).value)             # % per second
-        self.charge_rate = float(p('charge_rate', 0.5).value)             # % per second on the dock
-        self.min_mission_soc = float(p('min_mission_soc', 35.0).value)    # refuse missions below this
+        self.charge_rate = float(p('charge_rate', 0.5).value)             # % per second on a dock
+        self.min_mission_soc = float(p('min_mission_soc', 35.0).value)    # never accept below this
         self.low_soc = float(p('low_soc', 30.0).value)                    # idle + below -> go charge
         self.charge_resume_soc = float(p('charge_resume_soc', 90.0).value)  # on dock + below -> charge
         self.charge_until = float(p('charge_until', 95.0).value)
+        # energy estimate: straight-line distance * detour_factor * drain_per_meter, plus a reserve
+        self.detour_factor = float(p('detour_factor', 1.5).value)
+        self.reserve_soc = float(p('reserve_soc', 10.0).value)
         # behaviour
         self.pick_time = float(p('pick_time', 3.0).value)
         self.drop_time = float(p('drop_time', 3.0).value)
-        self.idle_return_after = float(p('idle_return_after', 15.0).value)  # s idle away from dock
+        self.idle_return_after = float(p('idle_return_after', 15.0).value)  # s idle away from a dock
         self.nav_retries = int(p('nav_retries', 2).value)
-        self.dock_retries = int(p('dock_retries', 3).value)
+        self.dock_attempts = int(p('dock_attempts', 3).value)
         self.nav_timeout = float(p('nav_timeout', 300.0).value)
         self.dock_tolerance = float(p('dock_tolerance', 0.6).value)
         self.ring_radius = float(p('neighbour_ring_radius', 0.32).value)   # radius of the disc drawn per neighbour
@@ -91,6 +100,8 @@ class RobotAgent(Node):
                       if (i * step) ** 2 + (j * step) ** 2 <= self.ring_radius ** 2]
 
         self.stations = load_stations()
+        self.docks = {k: v for k, v in self.stations.items() if k.startswith('dock_')}
+        self.dock_id = self.home_dock_id
         self.dock = self.stations[self.dock_id]
 
         self.lock = threading.RLock()
@@ -106,13 +117,14 @@ class RobotAgent(Node):
         self._speed = 0.0
         self._last_tick = None
         self._cancel_requested = False
+        self._low_abort = False
         self._near = False
-        self._nav_handle = None
 
         cb = ReentrantCallbackGroup()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose', callback_group=cb)
+        self.dock_client = self.create_client(RequestDock, '/fleet/request_dock', callback_group=cb)
         self.state_pub = self.create_publisher(S, 'robot_state', 10)
         self.cloud_pub = self.create_publisher(PointCloud2, 'other_robots', 10)
         self.create_subscription(Odometry, 'odom', self._on_odom, 10, callback_group=cb)
@@ -130,7 +142,7 @@ class RobotAgent(Node):
         self.create_timer(0.2, self._tick, callback_group=cb)
         self.create_timer(0.1, self._publish_neighbours, callback_group=cb)
         threading.Thread(target=self._startup, daemon=True).start()
-        self.get_logger().info(f'{self.robot_id}: agent up (dock {self.dock_id}); waiting for Nav2 ...')
+        self.get_logger().info(f'{self.robot_id}: agent up (home dock {self.home_dock_id}); waiting for Nav2 ...')
 
     # ------------------------------------------------------------------ helpers
     def _now_s(self):
@@ -163,6 +175,20 @@ class RobotAgent(Node):
     def _at_dock(self):
         return math.hypot(self.pose[0] - self.dock[0], self.pose[1] - self.dock[1]) <= self.dock_tolerance
 
+    # ------------------------------------------------------------------ energy estimate
+    def _dist_to_nearest_dock(self, x, y):
+        return min(math.hypot(x - d[0], y - d[1]) for d in self.docks.values())
+
+    def _energy_to_dock(self, x, y):
+        return self.drain_per_meter * self.detour_factor * self._dist_to_nearest_dock(x, y)
+
+    def _mission_energy(self, pickup, drop):
+        """Percent of battery a mission needs from the current pose: pose -> pickup -> drop -> nearest dock."""
+        metres = (math.hypot(pickup[0] - self.pose[0], pickup[1] - self.pose[1])
+                  + math.hypot(drop[0] - pickup[0], drop[1] - pickup[1])
+                  + self._dist_to_nearest_dock(drop[0], drop[1]))
+        return self.drain_per_meter * self.detour_factor * metres + self.reserve_soc
+
     # ------------------------------------------------------------------ startup
     def _nav_ready(self):
         if not self.nav_client.server_is_ready():
@@ -191,7 +217,7 @@ class RobotAgent(Node):
         self._speed = abs(msg.twist.twist.linear.x)
 
     def _tick(self):
-        """5 Hz: pose refresh, battery model, automatic dock return / charging."""
+        """5 Hz: pose refresh, battery model, low-battery abort, automatic dock return / charging."""
         pose = self._lookup(self.robot_id)
         now = self._now_s()
         with self.lock:
@@ -209,7 +235,16 @@ class RobotAgent(Node):
                 self.health, self.detail, self.state = S.FAULTED, 'battery depleted', S.FAULT
                 self._cancel_requested = True       # stops any running navigation
                 return
-            if self.state == S.STARTING or self.busy:
+            if self.state == S.STARTING:
+                return
+            if self.busy:
+                # mid-mission: stop while there is still enough charge to reach the nearest dock
+                if (self.state in MISSION_STATES and not self._low_abort
+                        and self.soc <= self._energy_to_dock(self.pose[0], self.pose[1]) + 0.5 * self.reserve_soc):
+                    self.get_logger().warn(f'{self.robot_id}: battery {self.soc:.0f}% is only enough to reach a dock '
+                                           f'-> dropping the mission and going to charge')
+                    self._low_abort = True
+                    self._cancel_requested = True
                 return
             if self.state == S.CHARGE:
                 if self.soc >= self.charge_until:
@@ -225,7 +260,7 @@ class RobotAgent(Node):
             elif self.soc < self.low_soc:
                 self._start_dock_return(f'low battery ({self.soc:.0f}%)')
             elif self.idle_since is not None and now - self.idle_since >= self.idle_return_after:
-                self._start_dock_return('idle: returning to default position')
+                self._start_dock_return('idle: returning to a dock')
 
     def _publish_state(self):
         msg = S()
@@ -238,6 +273,8 @@ class RobotAgent(Node):
             msg.nearest_robot_m = float(self.nearest)
             msg.assigned_task = self.task_id
             msg.detail = self.detail
+            msg.dock_id = self.dock_id
+            msg.drain_per_meter = float(self.drain_per_meter)
         self.state_pub.publish(msg)
 
     def _publish_neighbours(self):
@@ -280,7 +317,6 @@ class RobotAgent(Node):
         handle = fut.result()
         if not handle.accepted:
             return 'REJECTED'
-        self._nav_handle = handle
         result = handle.get_result_async()
         while not result.done():
             if self._cancel_requested or time.monotonic() - t0 > self.nav_timeout:
@@ -320,26 +356,54 @@ class RobotAgent(Node):
         while time.monotonic() - t0 < seconds and not self._cancel_requested:
             time.sleep(0.1)
 
-    # ------------------------------------------------------------------ dock return / faults
+    # ------------------------------------------------------------------ docks / faults
+    def _request_dock(self, exclude):
+        """Ask the fleet manager for the nearest free dock; None if it is unreachable or has none."""
+        if not self.dock_client.service_is_ready():
+            return None
+        req = RequestDock.Request()
+        req.robot_id, req.x, req.y = self.robot_id, float(self.pose[0]), float(self.pose[1])
+        req.exclude = list(exclude)
+        fut = self.dock_client.call_async(req)
+        t0 = time.monotonic()
+        while not fut.done() and time.monotonic() - t0 < 3.0:
+            time.sleep(0.05)
+        res = fut.result() if fut.done() else None
+        return res.dock_id if res is not None and res.granted else None
+
     def _start_dock_return(self, reason):
-        """Caller holds the lock and has checked that the robot is free."""
+        """Caller holds the lock and has checked that the robot is free (or is the mission worker)."""
         self.busy = True
         self._cancel_requested = False
+        self._low_abort = False
         threading.Thread(target=self._dock_return, args=(reason,), daemon=True).start()
 
     def _dock_return(self, reason):
-        self.get_logger().info(f'{self.robot_id}: returning to {self.dock_id}: {reason}')
-        with self.lock:
-            self.state = S.NAVIGATING_TO_DOCK
-            if self.health == S.HEALTHY:
-                self.detail = reason
-        ok = self._navigate(self.dock, retries=self.dock_retries)
+        tried, ok = [], False
+        for _ in range(self.dock_attempts):
+            dock_id = self._request_dock(tried)
+            if dock_id is None and self.home_dock_id not in tried:
+                dock_id = self.home_dock_id                      # manager unreachable / no free dock
+            if dock_id is None:
+                break
+            tried.append(dock_id)
+            with self.lock:
+                self.dock_id, self.dock = dock_id, self.stations[dock_id]
+                self.state = S.NAVIGATING_TO_DOCK
+                if self.health == S.HEALTHY:
+                    self.detail = reason
+            self.get_logger().info(f'{self.robot_id}: going to {dock_id}: {reason}')
+            if self._navigate(self.dock, retries=1):
+                ok = True
+                break
+            if self._cancel_requested:
+                break
         with self.lock:
             if ok:
                 self.health, self.detail = S.HEALTHY, ''
             elif self.health != S.FAULTED:      # (a depleted battery already faulted the robot)
-                self.health, self.detail = S.FAULTED, 'could not return to dock'
-                self.get_logger().error(f'{self.robot_id}: dock return failed -> FAULT')
+                self.health, self.detail = S.FAULTED, 'could not reach a dock'
+                self.get_logger().error(f'{self.robot_id}: dock return failed (tried {tried}) -> FAULT')
         self._finish_idle()
 
     def _on_reset_fault(self, _request, response):
@@ -347,7 +411,7 @@ class RobotAgent(Node):
             if self.state == S.FAULT and not self.busy and self.soc > 0.0:
                 self.health, self.detail = S.DEGRADED, 'fault reset'
                 self._start_dock_return('fault reset')
-                response.success, response.message = True, 'returning to dock'
+                response.success, response.message = True, 'returning to a dock'
             else:
                 response.success, response.message = False, 'not in a resettable FAULT'
         return response
@@ -357,20 +421,24 @@ class RobotAgent(Node):
         with self.lock:
             reason = None
             if self.busy:
-                reason = 'busy with another mission or returning to the dock'
+                reason = 'busy with another mission or returning to a dock'
             elif self.state not in (S.IDLE, S.CHARGE):
                 reason = f'not available (state {STATE_NAMES.get(self.state, self.state)})'
             elif self.health != S.HEALTHY:
                 reason = 'not healthy'
-            elif self.soc < self.min_mission_soc:
-                reason = f'battery {self.soc:.0f}% below {self.min_mission_soc:.0f}%'
             elif request.pickup_id not in self.stations or request.drop_id not in self.stations:
                 reason = 'unknown station'
+            else:
+                need = max(self.min_mission_soc,
+                           self._mission_energy(self.stations[request.pickup_id], self.stations[request.drop_id]))
+                if self.soc < need:
+                    reason = f'battery {self.soc:.0f}% below the {need:.0f}% this mission needs'
             if reason:
                 self.get_logger().warn(f'{self.robot_id}: rejecting task {request.task_id}: {reason}')
                 return GoalResponse.REJECT
             self.busy = True
             self._cancel_requested = False
+            self._low_abort = False
             return GoalResponse.ACCEPT
 
     def _on_cancel(self, _goal_handle):
@@ -378,8 +446,25 @@ class RobotAgent(Node):
         return CancelResponse.ACCEPT
 
     def _execute(self, gh):
-        req = gh.request
+        """Never leaves the robot 'busy': any exception ends in a dock return."""
         result = ExecuteMission.Result()
+        try:
+            return self._run_mission(gh, result)
+        except Exception as exc:    # noqa: BLE001 - last line of defence
+            self.get_logger().error(f'{self.robot_id}: mission crashed: {exc!r}')
+            result.success, result.message = False, f'internal error: {exc!r}'
+            with self.lock:
+                self.health, self.detail, self.task_id = S.DEGRADED, 'internal error', ''
+            try:
+                gh.abort()
+            except Exception:       # noqa: BLE001
+                pass
+            with self.lock:
+                self._start_dock_return('after an internal error')
+            return result
+
+    def _run_mission(self, gh, result):
+        req = gh.request
         with self.lock:
             self.task_id = f'{req.task_id} {req.pickup_id}>{req.drop_id}'   # shown in RobotState.assigned_task
         self.get_logger().info(f'{self.robot_id}: task {req.task_id}: {req.pickup_id} -> {req.drop_id} '
@@ -403,7 +488,27 @@ class RobotAgent(Node):
             else:
                 self._dwell(arg)
 
-        if failure and not self._cancel_requested:
+        if self.health == S.FAULTED:                    # battery depleted mid-mission: the robot stays where it is
+            result.success, result.message = False, 'battery depleted'
+            gh.abort()
+            self._finish_idle()
+            return result
+        if self._low_abort:                             # reserve reached: let the manager re-queue, go charging
+            result.success, result.message = False, 'low battery: mission dropped'
+            gh.abort()
+            with self.lock:
+                self.task_id = ''
+                self._start_dock_return('low battery during a mission')
+            return result
+        if self._cancel_requested:
+            result.success, result.message = False, 'canceled'
+            if gh.is_cancel_requested:                  # only a client cancel may end in 'canceled'
+                gh.canceled()
+            else:
+                gh.abort()
+            self._finish_idle()
+            return result
+        if failure:
             with self.lock:
                 self.health, self.detail, self.task_id = S.DEGRADED, failure, ''
             result.success, result.message = False, failure
@@ -411,13 +516,9 @@ class RobotAgent(Node):
             with self.lock:   # busy stays True: the dock-return worker owns the robot now
                 self._start_dock_return(f'after failed task {req.task_id}')
             return result
-        if self._cancel_requested:
-            result.success, result.message = False, 'canceled'
-            gh.canceled()
-        else:
-            result.success, result.message = True, 'done'
-            gh.succeed()
-            self.get_logger().info(f'{self.robot_id}: task {req.task_id} done (battery {self.soc:.0f}%)')
+        result.success, result.message = True, 'done'
+        gh.succeed()
+        self.get_logger().info(f'{self.robot_id}: task {req.task_id} done (battery {self.soc:.0f}%)')
         self._finish_idle()
         return result
 

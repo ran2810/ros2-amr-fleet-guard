@@ -4,7 +4,7 @@
   <name>warehouse_robot_agent</name>
   <version>0.1.0</version>
   <description>Per-robot mission agent: battery model, mission FSM, return-to-dock, neighbour awareness.</description>
-  <maintainer email="you@example.com">Ranjith</maintainer>
+  <maintainer email="prkr@mail.de">Ranjith</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>

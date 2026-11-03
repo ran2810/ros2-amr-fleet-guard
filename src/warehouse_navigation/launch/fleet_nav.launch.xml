@@ -18,6 +18,7 @@
   <arg name="lidar_samples" default="360"/>
   <arg name="imu_rate" default="50"/>
   <arg name="lifecycle_delay" default="4.0" description="Seconds before Nav2 lifecycle managers start (raise if bringup fails)"/>
+  <arg name="nav_stagger" default="10.0" description="Seconds between starting each robot's Nav2 stack"/>
 
   <include file="$(find-pkg-share warehouse_gazebo)/launch/warehouse.launch.xml">
     <arg name="num_robots" value="$(var num_robots)"/>
@@ -32,5 +33,6 @@
   <include file="$(find-pkg-share warehouse_navigation)/launch/navigation.launch.py">
     <arg name="num_nav_robots" value="$(var nav_robots)"/>
     <arg name="lifecycle_delay" value="$(var lifecycle_delay)"/>
+    <arg name="nav_stagger" value="$(var nav_stagger)"/>
   </include>
 </launch>

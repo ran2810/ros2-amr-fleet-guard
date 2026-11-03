@@ -9,6 +9,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotState.msg"
   "msg/FleetStatus.msg"
   "srv/SubmitTask.srv"
+  "srv/RequestDock.srv"
   "action/ExecuteMission.action"
   DEPENDENCIES builtin_interfaces
 )
