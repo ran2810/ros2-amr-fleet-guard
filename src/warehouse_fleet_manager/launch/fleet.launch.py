@@ -28,6 +28,12 @@ def _setup(context):
     ids = [f'robot_{i + 1}' for i in range(n)]
     value = lambda name: float(LaunchConfiguration(name).perform(context))  # noqa: E731
     nodes = []
+    # One central traffic coordinator.  It owns graph reservations and delegates approved legs to
+    # each robot's Nav2 NavigateThroughPoses action server.
+    nodes.append(Node(
+        package='warehouse_fleet_manager', executable='traffic_manager', name='traffic_manager',
+        output='screen',
+        parameters=[{'robot_ids': ids, 'use_sim_time': use_sim_time}]))
     for i, rid in enumerate(ids):
         nodes.append(Node(
             package='warehouse_robot_agent', executable='robot_agent', name='robot_agent',

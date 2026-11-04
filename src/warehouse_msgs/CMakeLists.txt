@@ -11,6 +11,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SubmitTask.srv"
   "srv/RequestDock.srv"
   "action/ExecuteMission.action"
+  "action/TrafficNavigate.action"
   DEPENDENCIES builtin_interfaces
 )
 

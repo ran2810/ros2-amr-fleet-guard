@@ -84,9 +84,11 @@ bt_navigator:
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
     transform_tolerance: 0.5
-    navigators: ["navigate_to_pose"]
+    navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
 
 controller_server:
   ros__parameters:
@@ -152,7 +154,7 @@ local_costmap:
         enabled: true
         observation_sources: scan robots
         scan:
-          topic: scan
+          topic: "/__NS__/scan"
           data_type: "LaserScan"
           marking: true
           clearing: true
@@ -165,7 +167,7 @@ local_costmap:
         # publishes the other robots' TF poses as filled discs of points; mark-only, latest message only.
         # The cloud is in 'map', so the range is measured from the map origin: keep it large.
         robots:
-          topic: other_robots
+          topic: "/__NS__/other_robots"
           data_type: "PointCloud2"
           marking: true
           clearing: false
@@ -202,7 +204,7 @@ global_costmap:
         enabled: true
         observation_sources: scan robots
         scan:
-          topic: scan
+          topic: "/__NS__/scan"
           data_type: "LaserScan"
           marking: true
           clearing: true
@@ -215,7 +217,7 @@ global_costmap:
         # publishes the other robots' TF poses as filled discs of points; mark-only, latest message only.
         # The cloud is in 'map', so the range is measured from the map origin: keep it large.
         robots:
-          topic: other_robots
+          topic: "/__NS__/other_robots"
           data_type: "PointCloud2"
           marking: true
           clearing: false
@@ -238,7 +240,7 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner::NavfnPlanner"
-      tolerance: 0.5
+      tolerance: 0.15
       use_astar: true
       allow_unknown: false
 

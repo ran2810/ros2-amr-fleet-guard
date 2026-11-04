@@ -8,6 +8,7 @@
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>warehouse_msgs</exec_depend>
   <exec_depend>warehouse_gazebo</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>

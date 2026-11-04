@@ -22,7 +22,8 @@ Interfaces (relative to the /robot_N namespace unless absolute):
     topic   robot_state       warehouse_msgs/msg/RobotState           2 Hz
     topic   other_robots      sensor_msgs/PointCloud2 in 'map'        10 Hz
     service reset_fault       std_srvs/Trigger                        retry the dock return after a FAULT
-    uses    navigate_to_pose  nav2_msgs/action/NavigateToPose, odom, TF (global /tf),
+    uses    /fleet/traffic_navigate warehouse_msgs/action/TrafficNavigate, odom, TF (global /tf),
+            (the central traffic manager delegates approved routes to Nav2 NavigateThroughPoses),
             /fleet/request_dock (warehouse_msgs/srv/RequestDock; falls back to the home dock)
 """
 import math
@@ -32,10 +33,8 @@ import time
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import PoseStamped
 from lifecycle_msgs.msg import State as LifecycleState
 from lifecycle_msgs.srv import GetState
-from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
@@ -48,11 +47,10 @@ from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
-from warehouse_msgs.action import ExecuteMission
+from warehouse_msgs.action import ExecuteMission, TrafficNavigate
 from warehouse_msgs.msg import RobotState as S
 from warehouse_msgs.srv import RequestDock
 
-NAV_STATUS = {4: 'SUCCEEDED', 5: 'CANCELED', 6: 'ABORTED'}
 STATE_NAMES = {0: 'IDLE', 1: 'NAVIGATING_TO_PICK', 2: 'PICK', 3: 'NAVIGATING_TO_DROP', 4: 'DROP',
                5: 'NAVIGATING_TO_DOCK', 6: 'CHARGE', 7: 'FAULT', 8: 'STARTING'}
 MISSION_STATES = (S.NAVIGATING_TO_PICK, S.PICK, S.NAVIGATING_TO_DROP, S.DROP)
@@ -123,7 +121,7 @@ class RobotAgent(Node):
         cb = ReentrantCallbackGroup()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose', callback_group=cb)
+        self.nav_client = ActionClient(self, TrafficNavigate, '/fleet/traffic_navigate', callback_group=cb)
         self.dock_client = self.create_client(RequestDock, '/fleet/request_dock', callback_group=cb)
         self.state_pub = self.create_publisher(S, 'robot_state', 10)
         self.cloud_pub = self.create_publisher(PointCloud2, 'other_robots', 10)
@@ -301,13 +299,13 @@ class RobotAgent(Node):
             self._near = False
 
     # ------------------------------------------------------------------ navigation
-    def _navigate_once(self, pose):
-        goal = NavigateToPose.Goal()
-        goal.pose = PoseStamped()
-        goal.pose.header.frame_id = 'map'
-        goal.pose.pose.position.x, goal.pose.pose.position.y = pose[0], pose[1]
-        goal.pose.pose.orientation.z = math.sin(pose[2] / 2.0)
-        goal.pose.pose.orientation.w = math.cos(pose[2] / 2.0)
+    def _navigate_once(self, pose, stage='navigation'):
+        """Ask the fleet traffic manager for a coordinated route to one target pose."""
+        goal = TrafficNavigate.Goal()
+        goal.robot_id = self.robot_id
+        goal.task_id = self.task_id or 'autonomous_return'
+        goal.stage = stage
+        goal.goal_x, goal.goal_y, goal.goal_yaw = (float(v) for v in pose)
         fut = self.nav_client.send_goal_async(goal)
         t0 = time.monotonic()
         while not fut.done():
@@ -327,20 +325,25 @@ class RobotAgent(Node):
                     time.sleep(0.05)
                 return 'TIMEOUT' if timed_out else 'CANCELED'
             time.sleep(0.1)
-        return NAV_STATUS.get(result.result().status, str(result.result().status))
+        wrapped = result.result()
+        if wrapped.status == 4 and wrapped.result.success:
+            return 'SUCCEEDED'
+        if wrapped.status == 5:
+            return 'CANCELED'
+        return f'ABORTED: {wrapped.result.message}'
 
     def _clear_costmaps(self):
         for client in self.clear_clients:
             if client.service_is_ready():
                 client.call_async(ClearEntireCostmap.Request())
 
-    def _navigate(self, pose, retries=None):
+    def _navigate(self, pose, retries=None, stage='navigation'):
         """Navigate with retries; returns True on success."""
         retries = self.nav_retries if retries is None else retries
         for attempt in range(retries + 1):
             if self._cancel_requested:
                 return False
-            outcome = self._navigate_once(pose)
+            outcome = self._navigate_once(pose, stage=stage)
             if outcome == 'SUCCEEDED':
                 return True
             self.get_logger().warn(f'{self.robot_id}: navigation to ({pose[0]:.1f}, {pose[1]:.1f}) '
@@ -393,7 +396,7 @@ class RobotAgent(Node):
                 if self.health == S.HEALTHY:
                     self.detail = reason
             self.get_logger().info(f'{self.robot_id}: going to {dock_id}: {reason}')
-            if self._navigate(self.dock, retries=1):
+            if self._navigate(self.dock, retries=1, stage='navigate_to_dock'):
                 ok = True
                 break
             if self._cancel_requested:
@@ -482,7 +485,7 @@ class RobotAgent(Node):
             fb.stage, fb.battery = stage, float(self.soc)
             gh.publish_feedback(fb)
             if isinstance(arg, tuple):
-                if not self._navigate(arg):
+                if not self._navigate(arg, stage=stage):
                     failure = f'{stage} failed'
                     break
             else:

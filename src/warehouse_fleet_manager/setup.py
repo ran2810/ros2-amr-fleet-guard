@@ -23,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'fleet_manager = warehouse_fleet_manager.manager:main',
+            'traffic_manager = warehouse_fleet_manager.traffic_manager:main',
             'submit_random_tasks = warehouse_fleet_manager.submit_random_tasks:main',
             'fleet_monitor = warehouse_fleet_manager.monitor:main',
         ],

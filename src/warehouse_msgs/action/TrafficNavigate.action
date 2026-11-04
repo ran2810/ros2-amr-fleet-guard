@@ -1,0 +1,16 @@
+# Central traffic-aware navigation request. The traffic manager owns corridor reservations and
+# delegates the approved route to the robot's Nav2 NavigateThroughPoses server.
+string robot_id
+string task_id
+string stage
+float64 goal_x
+float64 goal_y
+float64 goal_yaw
+---
+bool success
+string message
+string[] route_edges
+---
+string traffic_state
+string active_resource
+string waiting_for
