@@ -233,11 +233,11 @@ edges:
     resource: aisle_v_center
   - id: pick_1_access
     from: pick_1
-    to: w_s
+    to: dock_lane_1
     bidirectional: true
     resource: pick_1_access
   - id: drop_1_access
-    from: e_s
+    from: dock_lane_8
     to: drop_1
     bidirectional: true
     resource: drop_1_access

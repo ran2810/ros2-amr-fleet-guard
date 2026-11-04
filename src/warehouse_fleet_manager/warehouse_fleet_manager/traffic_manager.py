@@ -478,6 +478,12 @@ class TrafficManager(Node):
 
                 blocked = self.reservations.blocked_resources(rid)
                 plan = self.graph.plan(start, (goal[0], goal[1]), blocked)
+                # self.get_logger().info(
+                #     f'{rid}: start={start}, '
+                #     f'graph_start={plan.nodes[0]}, '
+                #     f'graph_start_xy={self.graph.nodes[plan.nodes[0]]}, '
+                #     f'goal={goal}, nodes={plan.nodes}'
+                # )
                 if plan is None:
                     # Find what the unconstrained shortest route would need so the wait-for graph
                     # contains useful owners.  If another graph route exists, the constrained plan

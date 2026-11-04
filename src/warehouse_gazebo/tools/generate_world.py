@@ -242,8 +242,16 @@ def render_traffic_yaml():
     add('rack_v_h2_n', 'c_h2', 'c_n', 'aisle_v_center')
 
     # Pick/drop station access corridors on the west/east sides.
-    level_nodes = [('w_s', 'e_s'), ('w_h1', 'e_h1'), ('w_h2', 'e_h2'), ('w_n', 'e_n')]
-    for i, (west, east) in enumerate(level_nodes, start=1):
+    # Row 1 shares y=-4.5 with the dock merge lane. Connect pick_1/drop_1 to the
+    # nearest dock-lane nodes instead of w_s/e_s; otherwise dock_1 -> pick_1 (and
+    # dock_8 -> drop_1) first drives toward the warehouse centre and then reverses
+    # direction, creating the visible right-left zig-zag in the planned trajectory.
+    add('pick_1_access', 'pick_1', 'dock_lane_1', 'pick_1_access')
+    add('drop_1_access', 'dock_lane_8', 'drop_1', 'drop_1_access')
+
+    # Rows 2..4 already connect directly to their nearest structural lane nodes.
+    level_nodes = [('w_h1', 'e_h1'), ('w_h2', 'e_h2'), ('w_n', 'e_n')]
+    for i, (west, east) in enumerate(level_nodes, start=2):
         add(f'pick_{i}_access', f'pick_{i}', west, f'pick_{i}_access')
         add(f'drop_{i}_access', east, f'drop_{i}', f'drop_{i}_access')
 

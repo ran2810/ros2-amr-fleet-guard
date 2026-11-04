@@ -9,3 +9,4 @@ __pycache__/
 *.Identifier
 .vscode
 *.md
+frames_*
