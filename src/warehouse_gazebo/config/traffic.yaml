@@ -6,117 +6,155 @@ routing:
   nearest_nodes: 1
   anchor_snap_dist: 0.75
   lock_route_nodes: true
+  directional_min_spacing: 1.50
 resources:
   lane_west_s_h1:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_west_h1_h2:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_west_h2_n:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_east_s_h1:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_east_h1_h2:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_east_h2_n:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_north_w_c:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_north_c_e:
     capacity: 1
+    directional: false
     conflicts_with: []
   aisle_h_south:
-    capacity: 1
+    capacity: 2
+    directional: true
     conflicts_with: [aisle_v_center]
   aisle_h_north:
-    capacity: 1
+    capacity: 2
+    directional: true
     conflicts_with: [aisle_v_center]
   aisle_v_center:
-    capacity: 1
+    capacity: 2
+    directional: true
     conflicts_with: [aisle_h_south, aisle_h_north]
   pick_1_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   drop_1_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   pick_2_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   drop_2_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   pick_3_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   drop_3_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   pick_4_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   drop_4_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_1_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_2_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_3_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_4_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_5_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_6_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_7_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   dock_8_access:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_1:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_2:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_3:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_4:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_5:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_6:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_7:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_8:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_9:
     capacity: 1
+    directional: false
     conflicts_with: []
   lane_south_10:
     capacity: 1
+    directional: false
     conflicts_with: []
 nodes:
   w_s: {x: -7.500, y: -4.500}
